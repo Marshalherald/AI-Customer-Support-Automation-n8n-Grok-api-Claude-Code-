@@ -83,5 +83,6 @@ When the AI confidence score falls below **80%**, the workflow automatically gen
 - Real-Time Customer Satisfaction (CSAT) Analysis
 - Predictive Support Insights using AI
 
-![WorkflowH1](screenshots/workflow%FirstHalf.png)
-![WorkflowH2](screenshots/workflow%SecondHalf.png)
+
+![Workflow - First Half](screenshots/workflow-first-half.png)
+![Workflow - Second Half](screenshots/workflow-second-half.png)
