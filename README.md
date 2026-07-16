@@ -37,12 +37,14 @@ Developed an **Agentic AI Customer Support Workflow** using **n8n**, **Groq Llam
 # System Architecture
 
 The system integrates **n8n**, **Google Drive**, **Google Docs**, **Groq Llama 3.3**, **Google Sheets**, and **Gmail** to retrieve knowledge, generate AI-powered responses, evaluate confidence, automate customer replies, and escalate unresolved queries to human support agents.
+![Architecture](Workflow/Architecture.png)
 
 ---
 
 # Workflow
 
 Customer queries are received through the **n8n Chat Trigger**, matched against the **Google Docs knowledge base**, processed by **Groq Llama 3.3**, evaluated using a confidence score, and either answered automatically or escalated to a human support agent while logging all interactions.
+![Workflow](Workflow/Workflow_Pipeline.png)
 
 ---
 
@@ -66,6 +68,7 @@ Customer queries are received through the **n8n Chat Trigger**, matched against 
 
 When the AI confidence score falls below **80%**, the workflow automatically generates a unique support ticket containing the customer query, AI draft response, confidence score, session details, and timestamp, then sends it to the assigned support agent through **Gmail** for manual resolution.
 
+
 ---
 
 # Future Enhancements
@@ -79,3 +82,6 @@ When the AI confidence score falls below **80%**, the workflow automatically gen
 - Automatic Follow-Up Email Automation
 - Real-Time Customer Satisfaction (CSAT) Analysis
 - Predictive Support Insights using AI
+
+![WorkflowH1](screenshots/workflow_FirstHalf.png)
+![WorkflowH2](screenshots/workflow_SecondHalf.png)
