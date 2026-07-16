@@ -84,5 +84,5 @@ When the AI confidence score falls below **80%**, the workflow automatically gen
 - Predictive Support Insights using AI
 
 
-![Workflow - First Half](screenshots/workflow-first-half.png)
-![Workflow - Second Half](screenshots/workflow-second-half.png)
+![Workflow - First Half](screenshots/workflow-FirstHalf.png)
+![Workflow - Second Half](screenshots/workflow-SecondHalf.png)
