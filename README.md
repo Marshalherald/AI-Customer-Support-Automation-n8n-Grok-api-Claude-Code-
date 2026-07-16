@@ -44,7 +44,7 @@ The system integrates **n8n**, **Google Drive**, **Google Docs**, **Groq Llama 3
 # Workflow
 
 Customer queries are received through the **n8n Chat Trigger**, matched against the **Google Docs knowledge base**, processed by **Groq Llama 3.3**, evaluated using a confidence score, and either answered automatically or escalated to a human support agent while logging all interactions.
-![Workflow](Workflow/Workflow_Pipeline.png)
+![Workflow Pipeline](Workflow/Workflow%20Pipeline.png)
 
 ---
 
