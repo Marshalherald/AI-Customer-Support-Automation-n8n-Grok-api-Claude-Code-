@@ -1,0 +1,840 @@
+{
+  "name": "AI Customer Support",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {
+          "responseMode": "lastNode"
+        }
+      },
+      "id": "8aec19ba-3cf4-41bf-be37-6f253bde91b4",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        112
+      ],
+      "webhookId": "f9c1c3a6-6f56-419f-9301-290a643244ef"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "limit": 10,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "",
+            "cachedResultName": "Select knowledge base folder"
+          },
+          "whatToSearch": "files",
+          "fileTypes": [
+            "application/vnd.google-apps.document"
+          ]
+        },
+        "options": {
+          "fields": [
+            "id",
+            "name"
+          ]
+        }
+      },
+      "id": "13c1f317-48bb-420d-a2af-25c70e616a56",
+      "name": "Search Knowledge Base",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        224,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "BmPWlFgbkOkjqQF2",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "documentURL": "={{ $json.id }}"
+      },
+      "id": "19ee076f-e6f1-42c2-87ea-c6a9805ac360",
+      "name": "Get Document Content",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 2,
+      "position": [
+        448,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "Twsogv23CDZdAbaM",
+          "name": "Google Docs account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "content"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "845b8a55-760e-4b2d-b792-bbed6bf5e0e7",
+      "name": "Combine KB Content",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        672,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const CHAR_BUDGET = 12000; // ~3000 tokens, safely under the 12k TPM limit\nconst first = $input.first().json;\nconst raw = first.content;\nconst docs = (Array.isArray(raw) ? raw : [raw])\n  .map(d => String(d == null ? '' : d))\n  .filter(d => d.trim().length > 0);\n\nconst trigger = $('Chat Trigger').first().json;\nconst question = String(trigger.chatInput || '');\nconst sessionId = String(trigger.sessionId || '');\nconst stop = new Set(['the','a','an','is','are','can','i','you','to','of','and','or','in','on','for','my','me','do','does','with','what','how','when','where','why','get','we','our','your']);\nconst qWords = question\n  .toLowerCase()\n  .split(/[^a-z0-9]+/)\n  .filter(w => w.length > 2 && !stop.has(w));\n\nconst scored = docs.map(text => {\n  const lower = text.toLowerCase();\n  let score = 0;\n  for (const w of qWords) {\n    let idx = lower.indexOf(w);\n    while (idx !== -1) { score++; idx = lower.indexOf(w, idx + w.length); }\n  }\n  return { text, score };\n});\nscored.sort((a, b) => b.score - a.score);\n\nlet context = '';\nfor (const d of scored) {\n  // once we have some relevant context, skip zero-match docs\n  if (d.score === 0 && context.length > 0) continue;\n  const sep = context ? '\\n\\n---\\n\\n' : '';\n  const remaining = CHAR_BUDGET - context.length - sep.length;\n  if (remaining <= 0) break;\n  context += sep + (d.text.length > remaining ? d.text.slice(0, remaining) : d.text);\n  if (context.length >= CHAR_BUDGET) break;\n}\n\nif (!context && scored.length) {\n  context = scored[0].text.slice(0, CHAR_BUDGET);\n}\n\nreturn [{ json: { context, chatInput: question, sessionId } }];"
+      },
+      "id": "aba1983d-cafc-4d00-8efa-258615111fbd",
+      "name": "Select Relevant Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Customer question:\n{{ $json.chatInput }}\n\nKnowledge base context:\n{{ $json.context }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a customer support assistant. Answer the customer ONLY using the provided knowledge base context. If the knowledge base does not contain the answer, politely say you do not have enough information and set a low confidence score. Always return a \"confidence\" integer from 0 to 100 reflecting how well the knowledge base supports your answer."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "id": "73b0e9ef-048d-4100-bec3-9f51f8d872da",
+      "name": "AI Support Agent",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1120,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {
+          "maxTokensToSample": 1024,
+          "temperature": 0.2
+        }
+      },
+      "id": "d264b40a-73aa-4b9d-8bf4-05c062e6c6bc",
+      "name": "Groq Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1056,
+        336
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "SZGwfEPgvfSl9CTN",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\"answer\":\"A clear, helpful answer based only on the knowledge base.\",\"confidence\":87}"
+      },
+      "id": "6895c72d-40a9-4918-92c7-785e0eb6a9ff",
+      "name": "Support Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1264,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "session_id",
+              "value": "={{ $('Select Relevant Context').first().json.sessionId }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "customer_question",
+              "value": "={{ $('Select Relevant Context').first().json.chatInput }}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "ai_answer",
+              "value": "={{ $json.output.answer }}",
+              "type": "string"
+            },
+            {
+              "id": "a4",
+              "name": "confidence",
+              "value": "={{ $json.output.confidence }}",
+              "type": "number"
+            },
+            {
+              "id": "a5",
+              "name": "timestamp",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "de9f421f-47e1-4c68-807d-4de8174ff79a",
+      "name": "Prepare Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1472,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.confidence }}",
+              "rightValue": 80,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "38226526-8244-439b-bcc6-9b2f1f647f23",
+      "name": "Confidence >= 80%?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1696,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1-_O8YfM_UwdEz7bVpSz85w-8HPWZS3mHpC76rkEldNA"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gid=0",
+          "cachedResultName": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $json.timestamp }}",
+            "Session ID": "={{ $json.session_id }}",
+            "Ticket ID": "",
+            "Customer Question": "={{ $json.customer_question }}",
+            "AI Draft Answer": "={{ $json.ai_answer }}",
+            "Confidence": "={{ $json.confidence }}",
+            "Status": "auto_answered"
+          },
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Session ID",
+              "displayName": "Session ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Ticket ID",
+              "displayName": "Ticket ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Customer Question",
+              "displayName": "Customer Question",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI Draft Answer",
+              "displayName": "AI Draft Answer",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Confidence",
+              "displayName": "Confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b545dfd5-fd4d-4eec-960d-f4f629360fe6",
+      "name": "Log Auto-Answer",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1920,
+        16
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "VFpgNnDpH357MkJl",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r1",
+              "name": "output",
+              "value": "={{ $('Prepare Result').item.json.ai_answer }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "69c3d008-f27b-4ae4-858c-c22b8ec7f80f",
+      "name": "Auto Reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2144,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "t1",
+              "name": "ticket_id",
+              "value": "={{ 'TKT-' + $now.toMillis() }}",
+              "type": "string"
+            },
+            {
+              "id": "t2",
+              "name": "status",
+              "value": "escalated",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "c577bd34-4fd9-4d12-884f-9af793f333d0",
+      "name": "Create Ticket",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1920,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "farhan.asad2002@gmail.com",
+        "subject": "={{ 'New support ticket ' + $json.ticket_id + ' (confidence ' + $json.confidence + '%)' }}",
+        "message": "=<h3>Low-confidence support request</h3><p><b>Ticket:</b> {{ $json.ticket_id }}</p><p><b>Confidence:</b> {{ $json.confidence }}%</p><p><b>Session:</b> {{ $json.session_id }}</p><p><b>Customer question:</b><br>{{ $json.customer_question }}</p><p><b>AI draft answer:</b><br>{{ $json.ai_answer }}</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "a7d59707-7236-4ed2-8d21-18adcf600503",
+      "name": "Notify Agent (Email)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2144,
+        208
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "webhookId": "961920e1-9e82-4c9f-a61f-20e497bf3bd2",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Hh4rtAaRFiIWQBZ3",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1",
+              "name": "output",
+              "value": "={{ 'Thanks for your question! Our support team is reviewing it and will get back to you shortly. Your reference number is ' + $('Create Ticket').item.json.ticket_id + '.' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d5090c67-33fb-4b66-9f79-4285ebbe613a",
+      "name": "Escalation Reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2368,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 1. Chat Trigger\nStarts the workflow when a visitor sends a message in the website chat. Captures the customer question (`chatInput`) and a `sessionId`.",
+        "height": 292,
+        "width": 182,
+        "color": 4
+      },
+      "id": "c7295ee3-4e39-417d-a7a9-47ad245f6196",
+      "name": "Note - Chat Trigger",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -32,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 2. Search Knowledge Base\nSearches the connected Google Drive folder for knowledge-base documents (Google Docs) and returns their IDs and names.",
+        "height": 276,
+        "width": 204,
+        "color": 5
+      },
+      "id": "4c2dd927-8396-405d-b130-a02049c51ec5",
+      "name": "Note - Search KB",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        176,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 3. Get Document Content\nOpens each document found in the previous step and pulls its full text so the AI has source material to answer from.",
+        "height": 276,
+        "width": 204,
+        "color": 5
+      },
+      "id": "5ccc1623-29e1-491a-9f0f-bb6257e8e284",
+      "name": "Note - Get Doc",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        400,
+        -160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 4. Combine KB Content\nMerges the text from all fetched documents into a single list, ready to be filtered down to what is relevant.",
+        "height": 260,
+        "width": 204,
+        "color": 5
+      },
+      "id": "0056c747-dcdc-4779-ba78-f9fdecbec606",
+      "name": "Note - Combine KB",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        624,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 5. Select Relevant Context\nRanks the docs by how well they match the question, then trims the combined text to a safe size (~3k tokens) so the request stays under the Groq rate limit. Also carries the question and session forward.",
+        "height": 332,
+        "width": 224,
+        "color": 5
+      },
+      "id": "a6c6552c-dcab-4ece-9d65-38e07c95c615",
+      "name": "Note - Select Context",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        816,
+        -208
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 6. AI Support Agent (Groq)\nSends the question + trimmed knowledge-base context to the Groq LLM. Answers ONLY from the provided context and returns a structured result: an `answer` plus a `confidence` score (0-100).",
+        "height": 300,
+        "width": 320,
+        "color": 3
+      },
+      "id": "5a56efb1-029f-4252-ad49-254153608c49",
+      "name": "Note - AI Agent",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1088,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 7. Prepare Result\nNormalises everything into clean fields for the next steps: session_id, customer_question, ai_answer, confidence and a timestamp.",
+        "height": 260,
+        "width": 220,
+        "color": 6
+      },
+      "id": "3e99396d-e5eb-4479-9d09-88f635e4b965",
+      "name": "Note - Prepare",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1424,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 8. Confidence >= 80%?\nThe decision point. If confidence is 80 or higher the answer is sent automatically (TRUE branch). Below 80 it is escalated to a human (FALSE branch).",
+        "height": 344,
+        "width": 188,
+        "color": 6
+      },
+      "id": "9d1f66ac-f718-4e49-918c-e53d6c1fb6f7",
+      "name": "Note - Gate",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1648,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 9a. Log Auto-Answer\nHigh-confidence path: appends the conversation, AI answer and confidence to the Google Sheet (Status = auto_answered).",
+        "height": 308,
+        "width": 172,
+        "color": 2
+      },
+      "id": "e657bd9f-4f0c-4260-a13e-cbda8628798e",
+      "name": "Note - Log Auto",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1888,
+        -288
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 10a. Auto Reply\nHigh-confidence path: returns the AI answer to the customer as the chat reply.",
+        "height": 288,
+        "width": 188,
+        "color": 2
+      },
+      "id": "bb08afae-f5d7-48c3-9b90-5cb509892056",
+      "name": "Note - Auto Reply",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2096,
+        -272
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 9b. Create Ticket\nLow-confidence path: generates a support ticket ID and marks the status as escalated.",
+        "height": 224,
+        "width": 172
+      },
+      "id": "8f79b6ef-da35-4471-bb61-825bf3dc14e8",
+      "name": "Note - Ticket",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1856,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 10b. Notify Agent (Email)\nLow-confidence path: emails a human agent the ticket, question, AI draft answer and confidence so they can follow up.",
+        "height": 276,
+        "width": 182
+      },
+      "id": "3a2106bc-838b-491a-981c-8beee8dc444a",
+      "name": "Note - Notify",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2144,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### 11b. Escalation Reply\nLow-confidence path: tells the customer their question is being reviewed and gives them the ticket reference number.",
+        "height": 180,
+        "width": 300
+      },
+      "id": "ce579ef5-ad3c-402c-b144-12de8f5aa75c",
+      "name": "Note - Esc Reply",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2528,
+        160
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Search Knowledge Base",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Knowledge Base": {
+      "main": [
+        [
+          {
+            "node": "Get Document Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Document Content": {
+      "main": [
+        [
+          {
+            "node": "Combine KB Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine KB Content": {
+      "main": [
+        [
+          {
+            "node": "Select Relevant Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select Relevant Context": {
+      "main": [
+        [
+          {
+            "node": "AI Support Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Support Agent": {
+      "main": [
+        [
+          {
+            "node": "Prepare Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Support Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Support Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Support Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Result": {
+      "main": [
+        [
+          {
+            "node": "Confidence >= 80%?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confidence >= 80%?": {
+      "main": [
+        [
+          {
+            "node": "Log Auto-Answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Auto-Answer": {
+      "main": [
+        [
+          {
+            "node": "Auto Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Ticket": {
+      "main": [
+        [
+          {
+            "node": "Notify Agent (Email)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Agent (Email)": {
+      "main": [
+        [
+          {
+            "node": "Escalation Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "6d29dca6-e3b4-44ac-a7d6-0c2905d0148e",
+  "meta": {
+    "instanceId": "9451e5e0ee5c5d8d21ddfecaa983a96bd38b55815a71dcf85419ea014d68c2b5"
+  },
+  "nodeGroups": [],
+  "id": "tgN3eN6uXIPuc8cv",
+  "tags": []
+}
